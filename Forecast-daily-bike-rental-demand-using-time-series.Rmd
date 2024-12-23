@@ -1,0 +1,483 @@
+---
+title: "Forecast daily bike rental demand using time series models"
+author: "Noble Eluwah"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# About Data Analysis Report
+
+This RMarkdown file contains the report of the data analysis done for the project on forecasting daily bike rental demand using time series models in R. It contains analysis such as data exploration, summary statistics and building the time series models. The final report was completed on `r date()`.
+
+**Data Description:**
+
+This dataset contains the daily count of rental bike transactions between years 2011 and 2012 in Capital bikeshare system with the corresponding weather and seasonal information.
+
+**Data Source:** <https://archive.ics.uci.edu/ml/datasets/bike+sharing+dataset>
+
+**Relevant Paper:**
+
+Fanaee-T, Hadi, and Gama, Joao, 'Event labeling combining ensemble detectors and background knowledge', Progress in Artificial Intelligence (2013): pp. 1-15, Springer Berlin Heidelberg
+
+# Task One: Load and explore the data
+
+## Load data and install packages
+
+```{r}
+## Import required packages
+packages <- c("tidyverse", "lubridate", "timetk", "forecast", "prophet", "plotly", "ggcorrplot")
+installed_packages <- installed.packages()
+for (pkg in packages) {
+  if (!(pkg %in% installed_packages)) {
+    install.packages(pkg)
+  }
+}
+lapply(packages, library, character.only = TRUE)
+
+```
+
+```{r}
+# Load the Dataset
+# Set the path to the files and read the CSV data
+day_data <- read.csv("day.csv")
+hour_data <- read.csv("hour.csv")
+
+# Initial Glimpse of the Data
+glimpse(day_data)
+glimpse(hour_data)
+
+# Set up a working directory (optional but recommended)
+# setwd("bike_sharing_dataset/")
+```
+
+# Task Two: Data Exploration
+
+```{r}
+# Initial Exploration of Daily Data
+cat("\n--- Summary of day_data ---\n")
+summary(day_data)
+
+cat("\n--- Structure of day_data ---\n")
+str(day_data)
+```
+
+**1. cnt (total rentals)**: - Range: 22 to 8,714 rentals per day. - Median: 4,548 rentals, showing a relatively even distribution around the middle value.
+
+**2. season and yr**: - Data spans all four seasons and two years (2011 and 2012).
+
+**3. Weather-related variables**: - temp (normalized temperature): Ranges from 0.06 to 0.86, showing diverse weather conditions. - windspeed: Ranges from 0.02 to 0.50, indicating varying wind conditions.
+
+**4. Insights from Structure**: - dteday is stored as a character type, which was converted to Date for time series analysis. - cnt, casual, and registered provide key demand data, with cnt being the sum of the latter two.
+
+------------------------------------------------------------------------
+
+```{r}
+# Check for missing values in day_data
+cat("\n--- Checking for Missing Values in day_data ---\n")
+colSums(is.na(day_data))
+```
+
+```{r}
+# Explore the Hourly Data
+cat("\n--- Summary of hour_data ---\n")
+summary(hour_data)
+
+cat("\n--- Structure of hour_data ---\n")
+str(hour_data)
+```
+
+**1.** - Hourly data contains 17,379 records, offering detailed granularity. - cnt (total rentals) ranges from 1 to 977 rentals per hour. - hr: Represents each hour of the day, allowing for time-of-day analysis.
+
+**2. Insights from Structure:** - hr provides an opportunity to explore hourly trends (e.g., peak times for rentals). - dteday in this dataset also required conversion to Date format.
+
+------------------------------------------------------------------------
+
+```{r}
+# Check for missing values in hour_data
+cat("\n--- Checking for Missing Values in hour_data ---\n")
+colSums(is.na(hour_data))
+
+# Check Unique Values for Key Categorical Columns in Daily Data
+cat("\n--- Unique values in categorical variables (day_data) ---\n")
+cat("Seasons: ", unique(day_data$season), "\n")
+cat("Years: ", unique(day_data$yr), "\n")
+cat("Months: ", unique(day_data$mnth), "\n")
+cat("Weathersit: ", unique(day_data$weathersit), "\n")
+```
+
+```{r}
+# Visualize Distribution of Total Bike Rentals (cnt)
+library(ggplot2)
+
+ggplot(day_data, aes(x = cnt)) +
+  geom_histogram(bins = 30, fill = "blue", color = "black", alpha = 0.7) +
+  labs(
+    title = "Distribution of Total Bike Rentals (cnt)",
+    x = "Total Bike Rentals",
+    y = "Frequency"
+  )
+```
+
+**The distribution is roughly bell-shaped, with most daily rental counts falling between 2,500 and 7,500.**
+
+**- There are a few outliers on the lower end, suggesting days with unusually low rentals (possibly due to extreme weather or holidays).**
+
+------------------------------------------------------------------------
+
+```{r}
+# Convert 'dteday' column to Date type
+day_data$dteday <- as.Date(day_data$dteday)
+
+# Analyze Seasonal and Temporal Trends in Daily Data
+ggplot(day_data, aes(x = dteday, y = cnt)) +
+  geom_line(color = "blue") +
+  labs(
+    title = "Daily Bike Rentals Over Time",
+    x = "Date",
+    y = "Total Bike Rentals"
+  )
+```
+
+**1. Upward Trend: A general increase in rentals from early 2011 to mid-2012, indicating growing demand for bike rentals.**
+
+**2. Seasonality**: - Peaks in warmer months (likely spring and summer) and dips in colder months (fall and winter).
+
+**3. Spikes: Sudden jumps may be due to events or anomalies, such as promotional campaigns or extreme weather.**
+
+------------------------------------------------------------------------
+
+```{r}
+# Check Correlation of Continuous Variables in Daily Data
+numeric_cols <- sapply(day_data, is.numeric)
+cor_matrix <- cor(day_data[, numeric_cols])
+
+cat("\n--- Correlation Matrix (Daily Data) ---\n")
+print(cor_matrix)
+```
+
+**1. Strong Correlations**: - cnt and registered: 0.95, indicating that most rentals are by registered users. - cnt and temp: 0.63, suggesting more rentals occur in favorable temperatures.
+
+**2. Weak/Negative Correlations**: - cnt and windspeed: -0.23, as high wind speeds may deter biking. - cnt and holiday: -0.07, indicating fewer rentals on holidays.
+
+------------------------------------------------------------------------
+
+```{r}
+# Visualize Correlation Matrix
+library(ggcorrplot)
+ggcorrplot(cor_matrix, lab = TRUE)
+```
+
+# Task Three: Create Interactive Time Series Plots
+
+```{r}
+# Ensure 'dteday' is in Date format
+day_data$dteday <- as.Date(day_data$dteday)
+
+# Load necessary libraries
+library(timetk)
+library(plotly)
+
+# Create an interactive time series plot for daily bike rentals
+interactive_plot <- day_data %>%
+  select(dteday, cnt) %>%
+  plot_time_series(
+    .date_var = dteday,
+    .value = cnt,
+    .interactive = TRUE, # Enables interactivity
+    .title = "Interactive Time Series Plot: Daily Bike Rentals",
+    .x_lab = "Date",
+    .y_lab = "Total Rentals"
+  )
+
+# Print the interactive plot
+interactive_plot
+
+```
+
+**1. Interactive visualization provides a clearer view of trends and patterns**: - Seasonal peaks and troughs are evident. - Allows zooming into specific time periods for further analysis.
+
+------------------------------------------------------------------------
+
+# Task Four: Smooth the Time Series Data
+
+```{r}
+# Ensure 'dteday' is in Date format
+day_data$dteday <- as.Date(day_data$dteday)
+
+# Smooth the Time Series using Moving Average
+library(dplyr)
+day_data <- day_data %>%
+  mutate(
+    ma_7 = zoo::rollmean(cnt, k = 7, fill = NA, align = "right"), # 7-day moving average
+    ma_30 = zoo::rollmean(cnt, k = 30, fill = NA, align = "right") # 30-day moving average
+  )
+
+# Plot Smoothed Data
+library(ggplot2)
+ggplot(day_data, aes(x = dteday)) +
+  geom_line(aes(y = cnt, color = "Original"), size = 0.5) +
+  geom_line(aes(y = ma_7, color = "7-Day Moving Average"), linewidth = 1) +
+  geom_line(aes(y = ma_30, color = "30-Day Moving Average"), linewidth = 1) +
+  labs(
+    title = "Smoothed Time Series: Daily Bike Rentals",
+    x = "Date",
+    y = "Total Rentals",
+    color = "Legend"
+  ) +
+  theme_minimal()
+
+# Use Lowess Smoothing
+lowess_fit <- lowess(day_data$dteday, day_data$cnt, f = 0.2) # Adjust 'f' for smoothness
+
+# Add Lowess to the Data Frame
+day_data$lowess <- lowess_fit$y
+
+# Plot Lowess Smoothed Data
+ggplot(day_data, aes(x = dteday)) +
+  geom_line(aes(y = cnt, color = "Original"), linewidth = 0.5) +
+  geom_line(aes(y = lowess, color = "Lowess Smoothing"), linewidth = 1) +
+  labs(
+    title = "Lowess Smoothed Time Series: Daily Bike Rentals",
+    x = "Date",
+    y = "Total Rentals",
+    color = "Legend"
+  ) +
+  theme_minimal()
+
+```
+
+### Smoothed Time Series: Moving Averages
+
+**Description**: 1. The plot shows the original daily bike rental data (blue line) alongside 7-day (green line) and 30-day (red line) moving averages.
+
+**Insights**: 1. 7-Day Moving Average captures weekly fluctuations and short-term trends.
+
+2.  30-Day Moving Average smooths out the data further, providing a clearer view of long-term trends.
+
+3.  Seasonal trends are visible, with peaks during warm months and troughs during colder months.
+
+------------------------------------------------------------------------
+
+### Lowess Smoothed Time Series
+
+**Description**: 1. The plot overlays a Lowess (locally weighted smoothing) line (red) on the original data (blue).
+
+**Insights**: 1. The Lowess curve provides a flexible, non-linear fit, highlighting the overall pattern without assuming linear relationships. 2. It confirms the seasonality and long-term growth trends, as well as the dip during winter months.
+
+------------------------------------------------------------------------
+
+# Task Five: Decompose Time Series and Check Stationarity
+
+## Decomposing the Time Series
+
+```{r}
+
+# Convert the data into a time series object
+library(stats)
+bike_ts <- ts(day_data$cnt, start = c(2011, 1), frequency = 365) # Daily data
+
+# Decompose the time series
+decomposed_ts <- decompose(bike_ts, type = "multiplicative")
+
+# Plot the decomposition (no `main` argument)
+plot(decomposed_ts)
+# title(main = "Decomposition of Daily Bike Rentals")
+```
+
+**Description**: 1. The decomposition splits the time series into observed, trend, seasonal, and random (residual) components.
+
+**Insights**: 1. **Trend**: Shows a gradual increase over time, indicating growing bike rental demand. 2. **Seasonality**: Repeats annually, with higher demand in warmer months and lower in colder ones. 3. **Residuals**: Fluctuations that cannot be explained by trend or seasonality, likely due to events or anomalies.
+
+------------------------------------------------------------------------
+
+## Check for Stationarity
+
+```{r}
+# Load necessary library
+library(tseries)
+
+# Perform Augmented Dickey-Fuller Test
+adf_test <- adf.test(bike_ts, alternative = "stationary")
+
+# Output the results of the ADF Test
+cat("\n--- Augmented Dickey-Fuller Test Results ---\n")
+print(adf_test)
+
+# Interpret the results
+if (adf_test$p.value < 0.05) {
+  cat("The time series is stationary (p-value < 0.05).\n")
+} else {
+  cat("The time series is NOT stationary (p-value >= 0.05). Consider differencing or transformations.\n")
+}
+
+# Visualize the differenced data if not stationary
+if (adf_test$p.value >= 0.05) {
+  diff_bike_ts <- diff(bike_ts)
+  
+  # Re-check stationarity after differencing
+  adf_diff_test <- adf.test(diff_bike_ts, alternative = "stationary")
+  
+  cat("\n--- Augmented Dickey-Fuller Test Results After Differencing ---\n")
+  print(adf_diff_test)
+  
+  # Plot the differenced time series
+  plot(diff_bike_ts, main = "Differenced Time Series", ylab = "Differenced Rentals", xlab = "Time")
+}
+
+```
+
+**Description**: 1. The plot shows the first-differenced time series to remove trends and seasonality, making the data stationary.
+
+**Insights**: 1. After differencing, the time series oscillates around zero, indicating that trends have been removed. 2. This is crucial for applying ARIMA models, which require stationarity.
+
+------------------------------------------------------------------------
+
+# Task Six: Fit ARIMA Models
+
+```{r}
+# Load the necessary library
+library(forecast)
+
+# Step 1: Fit an ARIMA Model
+# Apply the auto.arima() function to find the best ARIMA model for the differenced time series
+arima_model <- auto.arima(bike_ts, seasonal = TRUE, stepwise = TRUE, approximation = FALSE)
+
+# Output the summary of the fitted model
+cat("\n--- Summary of ARIMA Model ---\n")
+summary(arima_model)
+```
+
+```{r}
+# Step 2: Check Residual Diagnostics
+# Plot diagnostics to check residuals of the ARIMA model
+cat("\n--- Residual Diagnostics for ARIMA Model ---\n")
+checkresiduals(arima_model)
+```
+
+**Description**: 1. The diagnostics evaluate the quality of the ARIMA model by examining residuals. 2. Top-left: Residuals over time. 3. Top-right: Density plot of residuals. 4. Bottom-left: ACF (autocorrelation function) of residuals.
+
+**Insights**: 1. The residuals appear randomly distributed around zero, indicating no significant patterns left unexplained by the model. 2. The ACF plot shows no significant autocorrelations, suggesting the residuals are white noise and the ARIMA model fits well.
+
+------------------------------------------------------------------------
+
+```{r}
+# Step 3: Forecast Future Bike Rentals
+# Forecast the next 30 days
+forecast_arima <- forecast(arima_model, h = 30)
+
+# Plot the forecast
+cat("\n--- Forecast Plot ---\n")
+plot(forecast_arima, main = "Forecast of Daily Bike Rentals", xlab = "Time", ylab = "Total Rentals")
+
+```
+
+**Description**: 1. The plot shows the forecasted values (blue line) for the next 30 days, along with confidence intervals (shaded areas).
+
+**Insights**: 1. The forecast follows the observed seasonal pattern, with expected demand increasing during warmer months. 2. Wider confidence intervals reflect uncertainty in the predictions, particularly as the forecast horizon extends.
+
+------------------------------------------------------------------------
+
+```{r}
+# Step 4: Print Forecasted Values
+cat("\n--- Forecasted Values for the Next 30 Days ---\n")
+print(forecast_arima)
+```
+
+**Description**: 1. A tabular output of the forecasted daily bike rentals, including 80% and 95% confidence intervals.
+
+**Insights**: 1. The point forecast provides the predicted daily rentals. 2. The confidence intervals indicate the range within which the true value is likely to fall: - 80% interval is narrower and less conservative. - 95% interval is wider and more conservative.
+
+------------------------------------------------------------------------
+
+# Task Eight: Findings and Recommendations
+
+## Findings
+
+Based on the extensive analysis of the bike rental data from 2011 to 2012, several key insights have emerged:
+
+### 1. General Trends
+
+-   **Upward Trend**: Bike rentals showed a significant upward trend over the two years, indicating increasing popularity of the bike rental service.
+    -   This growth may be attributed to increased awareness, marketing campaigns, or infrastructure improvements such as bike lanes.
+-   **High Usage Periods**: Rentals peaked during the warmer months (spring and summer) and declined during colder months (fall and winter), demonstrating strong seasonality.
+-   **Daily Patterns**: Weekday rentals were generally higher than holiday rentals, indicating demand driven by commuting patterns (e.g., registered users).
+
+### 2. Key Influencing Factors
+
+-   **Temperature**: A positive correlation (0.63) between temperature and rentals indicates that warmer weather encourages biking.
+-   **Weather Conditions**: Adverse weather (e.g., high wind speeds or precipitation) negatively impacts bike rental demand.
+-   **Registered Users**: The majority of rentals are by registered users (correlation of 0.95 with total rentals), highlighting the reliance on repeat customers.
+
+### 3. Time Series Analysis
+
+-   **Decomposition**:
+    -   The time series exhibits clear seasonality, with repeating annual patterns of high demand in summer and low demand in winter.
+    -   Residuals revealed occasional anomalies, likely due to extreme weather or special events.
+-   **Stationarity**:
+    -   The data was non-stationary initially but became stationary after differencing, allowing for effective ARIMA modeling.
+-   **ARIMA Model Performance**:
+    -   The selected ARIMA model fits the data well, with residuals resembling white noise (random and normally distributed), indicating no significant patterns left unexplained.
+
+### 4. Forecast Results
+
+-   **Next 30 Days**:
+    -   Demand is expected to remain stable in the short term but shows slight increases as seasonal demand begins to rise.
+    -   Forecast confidence intervals indicate reasonable accuracy but highlight uncertainty as the horizon extends.
+-   **Longer-Term Expectations**:
+    -   The seasonal component suggests an upcoming increase in demand as warmer months approach.
+    -   Forecasted growth aligns with historical trends of increasing popularity.
+
+------------------------------------------------------------------------
+
+## Recommendations
+
+### 1. Fleet Management
+
+-   **Seasonal Optimization**:
+    -   Increase the availability of bikes and maintenance staff in preparation for higher demand during spring and summer.
+    -   Reduce fleet size or reallocate bikes during the winter months to avoid underutilization and reduce costs.
+-   **Demand Balancing**:
+    -   Deploy additional bikes to high-demand locations, especially during peak commuting hours and warmer months.
+    -   Use historical hourly data to identify bottlenecks at specific times and adjust redistribution efforts accordingly.
+
+### 2. Pricing Strategy
+
+-   **Dynamic Pricing**:
+    -   Increase prices slightly during peak demand periods (e.g., weekends, summer months) to maximize revenue while maintaining service quality.
+    -   Offer discounts or promotions during low-demand periods (e.g., winter or holidays) to attract casual riders and incentivize off-season usage.
+-   **Membership Programs**:
+    -   Continue to focus on retaining and growing registered user membership, as they constitute the majority of rentals.
+    -   Introduce tiered membership plans with perks (e.g., priority access during peak hours) to encourage loyalty.
+
+### 3. Weather-Driven Adjustments
+
+-   **Adverse Weather Protocols**:
+    -   Reduce fleet deployment during extreme weather conditions (e.g., storms or heavy precipitation) to avoid operational inefficiencies.
+    -   Send real-time weather-based notifications or app alerts to users, encouraging safe riding practices.
+
+### 4. Marketing and Engagement
+
+-   **Seasonal Campaigns**:
+    -   Launch promotional campaigns early in spring to capitalize on increasing demand.
+    -   Highlight the health and environmental benefits of cycling to attract new users.
+-   **Event Partnerships**:
+    -   Partner with local events or festivals to increase rentals on those specific dates, especially during off-peak seasons.
+-   **Customer Retention**:
+    -   Use data-driven insights to reward high-usage members with loyalty incentives (e.g., free rides, discounts).
+
+### 5. Data-Driven Decision Making
+
+-   **Demand Forecasting**:
+    -   Use forecasts to proactively allocate resources and bikes to high-demand areas.
+-   **Infrastructure Investments**:
+    -   Identify high-demand stations and invest in expanding or enhancing their facilities (e.g., adding more docking stations).
+-   **Performance Monitoring**:
+    -   Continuously monitor residuals from the ARIMA model to identify anomalies or shifts in user behavior.
+
+------------------------------------------------------------------------
+
+## Conclusion
+
+This analysis underscores the importance of understanding seasonal patterns, user behavior, and environmental factors in optimizing bike rental operations. By leveraging the insights and implementing the recommendations above, the company can enhance its service, improve user satisfaction, and achieve operational efficiency while maximizing profitability.
