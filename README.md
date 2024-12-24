@@ -109,22 +109,25 @@ For a detailed description, refer to the `Readme.txt` file provided with the dat
 ---
 
 ## Folder Structure
-project/
-│
-├── data/
-│   ├── day.csv
-│   ├── hour.csv
-│   └── Readme.txt
-│
-├── scripts/
-│   └── analysis.R
-│
-├── results/
-│   ├── smoothed_plots/
-│   ├── decomposition.png
-│   ├── differenced_series.png
-│   ├── forecast_plots/
-│   └── forecasted_values.csv
-│
-├── README.md
-└── report.Rmd
+project/  
+│  
+├── data/  
+│   ├── day.csv  
+│   ├── hour.csv  
+│   └── Readme.txt  
+│  
+├── scripts/  
+│   └── analysis.R  
+│  
+├── results/  
+│   ├── smoothed_plots/  
+│   ├── decomposition.png  
+│   ├── differenced_series.png  
+│   ├── forecast_plots/  
+│   └── forecasted_values.csv  
+│  
+├── README.md  
+└── report.Rmd  
+
+## View Publication
+**To view the output of this repository with much ease, [click here] (https://rpubs.com/nobleen/forecast-daily-bike-rentals)
