@@ -130,4 +130,4 @@ project/
 └── report.Rmd  
 
 ## View Publication
-**To view the output of this repository with much ease, [click here] (https://rpubs.com/nobleen/forecast-daily-bike-rentals)
+**To view the output of this repository with much ease, [click here](https://rpubs.com/nobleen/forecast-daily-bike-rentals)**
